@@ -108,9 +108,7 @@ class BaseApproximant(object):
         corresponds to the value of the ith-derivative of f(x),
         excluding the 0th derivative.
         """
-        ider = []
-        total_der = 0
-        xused = []
+        ider = [] ; xused = []
         for xj in x:
             if xj not in xused:
                 # Get all repited values
