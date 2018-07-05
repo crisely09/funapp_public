@@ -6,16 +6,18 @@ import numpy as np
 import scipy as sp
 from scipy import linalg as sl
 
+from funapp.base import BaseApproximant
+from funapp.tools import taylor
 
-__all__ = ['BasicPadeApproximant', 'GeneralPadeApproximant',]
+__all__ = ['PadeApproximant', 'BasicPadeApproximant', 'GeneralPadeApproximant',]
 
-class PadeApproximent(BaseApproximant):
+class PadeApproximant(BaseApproximant):
     """
     Attributes
     ----------
     _m, _n : int
         Order of numerator and denominator series
-        of the Padé approximant.
+        of the Pade approximant.
     _p, _q : np.poly1d
         Polynomials of the Pade approximant.
     _xlen : int
@@ -38,8 +40,8 @@ class PadeApproximent(BaseApproximant):
 
     """
 
-    def __init__(x, y, m, n):
-        """Initialize Class for General Pade Approximants.
+    def __init__(self, x, y, m, n):
+        """Initialize base class for Pade Approximants.
 
         Parameters
         ----------
@@ -50,19 +52,20 @@ class PadeApproximent(BaseApproximant):
             derivatives evaluated at `x`.
         m, n : int
             Order of numerator and denominator series
-            of the Padé approximant.
+            of the Pade approximant.
 
         """
         # Check arrays and initialize base class
-        BaseApproximant.__init__(x, y)
-        if m + n <= self._xlen:
-            raise ValueError("To construct a [%d/%d] approximant at least\
-                    %d points are needed" % (m, n, m+n))
+        BaseApproximant.__init__(self, x, y)
+        if not isinstance(m, int):
+            raise TypeError('m must be integer.')
+        if not isinstance(n, int):
+            raise TypeError('m must be integer.')
         self._m = m
         self._n = n
 
     def __call__(self, x, der=0):
-        """Evaluate the Padé approximant and its derivatives at the points `x`.
+        """Evaluate the Pade approximant and its derivatives at the points `x`.
 
         Arguments
         ---------
@@ -95,7 +98,7 @@ class PadeApproximent(BaseApproximant):
                 result.append(self._derivate(x, d))
         return result
 
-    def store_derivatives(self):
+    def _store_derivatives(self):
         """Save derivatives of polynomials."""
         # Store all derivatives or p and q
         self._pders = []
@@ -127,7 +130,7 @@ class PadeApproximent(BaseApproximant):
 
         Parameters
         ----------
-        x : array-like
+        xi : array-like
             Points where the approximant will be evaluated.
         der: int
             Order of the derivative(s) to extract.
@@ -135,53 +138,61 @@ class PadeApproximent(BaseApproximant):
         Returns
         Array with values of the derivatives of x.
         """
-        if not isinstance(m, int):
-            raise TypeError('The order of derivative, m, should be int.')
-        if m == 0:
+        xi = np.ravel(xi)
+        if not isinstance(der, int):
+            raise TypeError('The order of derivative, der, should be int.')
+        if der == 0:
             raise ValueError('For the evaluation of the function use the call method instead.')
         numerator = 0.0
         denominator = 1.0
-        der_deffs = []
-        a = 1
+        der_terms = []
+        a = 0
         d = 1
         c = 1.0
+        # Generate lists that contains information of each derivative term
+        # For each term has 4 components:
+        # 1) the derivative order of the numerator
+        # 2) the power and derivative order of terms generated form the derivative
+        #    of the denominator
+        # 3) the derivative order of the denominator
+        # 4) the coefficient (constant in front of the term)
+        #
         der_terms.append([a, [], d, c])
-        for i in range(m):
+        for i in range(der):
             new_terms = []
             for term in der_terms:
                 add_prelated(term, new_terms)
                 add_qnumterms(term, new_terms)
                 add_qdenterms(term, new_terms)
-            clean_terms(new_terms)
+            new_terms = clean_terms(new_terms)
             der_terms = new_terms
 
         # Evaluate Terms
         # Create array to store values
-        ders = np.zeros(x.shape)
+        ders = np.zeros(xi.shape)
         # Evaluate term by term
         for term in der_terms:
-            tmp = np.zeros(x.shape)
+            tmp = np.zeros(xi.shape)
             # Separate values first
             a = term[0]
             qterms = term[1]
             d = term[2]
             c = term[3]
             # add P terms
-            if a > 1:
+            if a > 0:
                 tmp += self._pders[a-1](xi)
             else:
                 tmp += self._p(xi)
             # Multiply by Q terms in numerator
             for t in qterms:
                 order, power = t
-                if order > 1:
+                if order > 0:
                     valueq = self._qders[order-1](xi)
                 else:
                     valueq = self._q(xi)
                 if power != 1:
                     valueq = valueq**power
-                else:
-                    tmp *= valueq
+                tmp *= valueq
             # Divide by Q terms in denominator
             if d == 1:
                 tmp /= self._q(xi)
@@ -227,7 +238,8 @@ def add_qdenterms(term, new_terms):
     # We modify the constant, the power of Q, and add Q' to the
     # numerator.
     a = term[0]
-    qterms = term[1].append([1, 1]) # derivative order and power of the term
+    qterms = term[1][:]
+    qterms.append([1, 1]) # derivative order and power of the term
     d = term[2] + 1
     c = term[3] * (-term[2])
     new_terms.append([a, qterms, d, c])
@@ -243,21 +255,33 @@ def add_qnumterms(term, new_terms):
     new_terms : list
         The list where the new terms will be appended.
 
+    Note: The new terms are added at the begging of the new list of qterms.
+
     """
     # Use chain rule for Q terms.
     a = term[0]
     qterms = term[1]
     d = term[2]
+    c = term[3]
     for i, qterm in enumerate(qterms):
-        n, m = qterm
+        order, power = qterm
         # Chain rule
-        if m > 1:
-            c = term[3] * m
-            qterm[1] = m - 1
-            new_terms.append([a, [qterm, [qterm[0] + 1, 1]], d, c])
+        if power > 1:
+            c *= power
+            new = [[order, power - 1], [order + 1, 1]]
+            extra = [t for t in qterms if qterm != t]
+            if len(extra) > 0:
+                for ex in extra:
+                    new.append(ex)
+            new_terms.append([a, new, d, c])
         # Simple derivative
         else:
-            new_terms.append([a, [qterm[0] + 1, 1], d, c])
+            new = [[order + 1, 1]]
+            extra = [t for t in qterms if qterm != t]
+            if len(extra) > 0:
+                for ex in extra:
+                    new.append(ex)
+            new_terms.append([a, new, d, c])
 
 
 def clean_terms(new_terms):
@@ -269,15 +293,39 @@ def clean_terms(new_terms):
         The list where the new terms will be appended.
 
     """
+    same = []
+    # First clean all qterms, multiply terms with same order
+    new_q = []
+    sames = []
     for i, term in enumerate(new_terms):
-        for j in range(i, len(new_terms)):
+        new_q.append([])
+        qterms = term[1][:]
+        #sames.append([])
+        for l in range(len(qterms)):
+            try:
+                q = qterms[l][:]
+                for k in range(l+1, len(qterms)):
+                    qother = qterms[k][:]
+                    if q[0] == qother[0]:
+                        #if k not in sames[i]:
+                        q[1] += qother[1]
+                        del(qterms[l])
+
+                new_q[i].append(q[:])
+            except IndexError:
+                pass
+    for i in range(len(new_terms)):
+        new_terms[i][1] = new_q[i]
+    for i, term in enumerate(new_terms):
+        # Sum terms with same orders
+        for j in range(i+1, len(new_terms)):
             other = new_terms[j]
             # Check P and Q simple
             if term[0] == other[0] and term[2] == other[2]:
                 # Check Q terms in numerator
                 if term[1] == other[1]:
                     # Identify repeated terms and add them up
-                    if j not in same:
+                    if i not in same:
                         term[3] += other[3]
                         # Save indices of the repeated term to be
                         # deleted later
@@ -301,7 +349,7 @@ class BasicPadeApproximant(PadeApproximant):
         Taylor series coefficients.
     m: int
         Order of numerator and denominator series
-        of the Padé approximant.
+        of the Pade approximant.
 
     """
     def __init__(self, x, y, ds, m):
@@ -322,7 +370,7 @@ class BasicPadeApproximant(PadeApproximant):
         self._q = q
 
         # Save derivatives
-        self.store_derivatives()
+        self._store_derivatives()
 
 
 class GeneralPadeApproximant(PadeApproximant):
@@ -332,7 +380,7 @@ class GeneralPadeApproximant(PadeApproximant):
     ----------
     _m, _n : int
         Order of numerator and denominator series
-        of the Padé approximant.
+        of the Pade approximant.
     _xlen : int
         Length of the array with points.
     _der : int or list(int)
@@ -344,7 +392,8 @@ class GeneralPadeApproximant(PadeApproximant):
     Methods
     -------
     __call__
-    _get_matrix_form
+    _get_matrix_all
+    _get_matrix_select
     _sort_coeffs
     _evaluate
     _derivate
@@ -367,6 +416,10 @@ class GeneralPadeApproximant(PadeApproximant):
     def __init__(self, x, y, m, n, eps=1e-3):
         """Initialize Class for General Pade Approximants.
 
+        With general, we mean that we don't have a Taylor series, nor the derivatives
+        and the approximant is generated just from the given points and the 
+        function evaluated at those points.
+
         Parameters
         ----------
         x : np.ndarray
@@ -376,32 +429,41 @@ class GeneralPadeApproximant(PadeApproximant):
             derivatives evaluated at `x`.
         m, n : list with orders
             Order of numerator and denominator series
-            of the Padé approximant.
+            of the Pade approximant.
 
         """
         # Check arrays and initialize base class
-        PadeApproximant.__init__(x, y, m, n)
+        PadeApproximant.__init__(self, x, y, m, n)
+        if m + n > self._xlen:
+            raise ValueError("To construct a [%d/%d] approximant at least\
+                    %d points are needed" % (m, n, m+n))
         self.eps = eps
         # get matrix form
-        matrix = self._get_matrix_form()
-        zeros = np.zeros(self._xlen)
+        matrix, bvector = self._get_matrix_all()
+        
 
         # Solve for the coefficients
-        result = np.linalg.solve(matrix, zeros)
-        ps, qs = self._sort_coeffs(result)
+        result = np.linalg.lstsq(matrix, bvector)[0]
+        #result = np.linalg.solve(matrix, zeros)
+        # Split the results for Pm and Qn, also reverse order
+        # because the poly1d polynomials are order from high order
+        # to low order (opposite as the Pade series)
+        ps, qs = self._sort_coeffs_all(result)
+        # Qn is missing the first term, b0 = 1, so append it now.
+        qs = np.append(qs, np.array([1.0]))
 
         # Build approximant using poly1d objects
         self._p = np.poly1d(ps)
         self._q = np.poly1d(qs)
 
         # Save derivatives
-        self.store_derivatives()
+        self._store_derivatives()
 
-    def _get_matrix_form(self):
-        r"""Construct the matrix to use for solving the linear equations.
+    def _get_matrix_all(self):
+        r"""Construct the matrix with all the series components.
 
         We use a linear solver giving a matrix A which rows are:
-        :math:`{1, F(x_k)x_k, -x_k, F(x_k)x_k^2, -x_k^2, ..., F(x_k)x_k^n, -x_k^m}`
+        :math:`{-1, -x_k, -x_k^2, ..., -x_k^m, F(x_k), F(x_k)x_k, F(x_k)x_k^2, F(x_k)x_k^n}`
         and solve: A x = 0,
         A includes the derivatives in the approximation:
         :math:`F(x + \epsilon)Q(x + \epsilon) \approx P(x + \epsilon)`
@@ -411,54 +473,77 @@ class GeneralPadeApproximant(PadeApproximant):
         """
 
         # Fill out the matrix for the function values
-        lenpars = self._m + self._n
-        matrix = np.zeros((lenpars, self._lenx))
+        lenpars = self._m + self._n + 1
+        npoints = self._xlen
+        matrix = np.zeros((npoints, lenpars))
+        b = np.zeros(npoints)
         for i, point in enumerate(self._x):
             # Set values related with the numerator P_m(x)
-            matrix[i,0] = - 1.0
+            # NOTE: As Pm series has a_0, we have m+1 terms
+            matrix[i,0] =  -1.0
             prefac = point
-            for j in range(1, self._m - 1):
+            for j in range(1, self._m+1):
                 matrix[i, j] = -prefac
                 prefac *= point
             # Set values related with the denominator Q_n(x)
-            matrix[i,self._m] = self._y[i]
+            # NOTE: b_0 = 1, so we only have n terms
             prefac = point*self._y[i]
-            for j in range(self._m + 1, lenpars - 1):
+            for j in range(self._m+1, lenpars):
                 matrix[i, j] = prefac
                 prefac *= point
+            b[i] = - self._y[i]
 
         # If derivatives provided, get the extra matrix elements
         # Fill out the matrix for the derivatives
         if self._ders:
             # New starting point
             k = len(self._x)
+            eps = self.eps
             for der in self._ders:
+                derlist = []
                 derlist.append(self._y[np.where(der[0]==self._x)])
                 higher_der = [dval for dval in der[1]]
                 derlist += higher_der
-                lder = len(derlist)
+                lder = len(derlist)-1
                 for i in range(lder):
                     # Use the space in the matrix after the points
                     sgn = (-1)**i
                     if (i+1)%2 == 0:
                         eps += eps
                     newx = der[0] + sgn*eps
-                    newy = taylor(derlist, lder-1, eps, sgn)
+                    newy = taylor(derlist, lder, eps, sgn)
                     # Set values related with the numerator P_m(x)
-                    matrix[k, 0] = - 1.0
+                    matrix[k, 0] =  -1.0
                     prefac = newx
-                    for j in range(1, self._m - 1):
+                    for j in range(1, self._m+1):
                         matrix[k, j] = -prefac
                         prefac *= newx
                     # Set values related with the denominator Q_n(x)
-                    matrix[k, self._m] = newy
+                    b[k] = - newy
                     prefac = newx*newy
-                    for j in range(self._m + 1, lenpars - 1):
+                    for j in range(self._m+1, lenpars):
                         matrix[k, j] = prefac
                     k += 1
-        return matrix
+        return matrix, b
 
-    def _sort_coeffs(self, coeffs):
+    def _get_matrix_select(self, selection='even'):
+        r"""Construct the matrix for some of the series components.
+
+        We use a linear solver giving a matrix A which rows are:
+        :math:`{1, F(x_k)x_k, -x_k, F(x_k)x_k^2, -x_k^2, ..., F(x_k)x_k^n, -x_k^m}`
+        and solve: A x = 0,
+        A includes the derivatives in the approximation:
+        :math:`F(x + \epsilon)Q(x + \epsilon) \approx P(x + \epsilon)`
+        where
+        :math:`F(x + \epsilon) \approx F(x) \pm \frac{1}{2}\epsilon F'(x) + ...`
+
+        Parrameters
+        -----------
+            selection : str or lists?
+                Which components to use.
+        """
+
+    def _sort_coeffs_all(self, coeffs):
         """Sort the coefficients of the Pade Approximant.
 
         Arguments
@@ -474,5 +559,6 @@ class GeneralPadeApproximant(PadeApproximant):
             Coefficients for the denominator of the approximant.
 
         """
-        ps = coeffs[:,len(self._x)]
-        qs = coeffs[len(self._x):]
+        ps = coeffs[:self._m+1][::-1]
+        qs = coeffs[self._m+1:][::-1]
+        return ps, qs

@@ -66,7 +66,7 @@ class BaseApproximant(object):
         check_input(x, y)
         x, y = clean_arrays(x, y)
         self._xlen = len(x)
-        self._get_der(x, y)
+        self._get_ders(x, y)
         self._prune_arrays(x, y)
 
     def __call__(self, xi, der=0):
@@ -132,16 +132,18 @@ class BaseApproximant(object):
 
         """
         ders = [] ; xused = []
+        count = 0
         for xj in x:
             if xj not in xused:
                 # Get all repited values
                 unique = np.where(abs(x-xj)<1e-10)[0]
                 # Remove 0th derivative
                 if len(unique) > 1:
+                    count += len(y[unique[1:]])
                     ders.append([xj, list(y[unique[1:]])])
             xused.append(xj)
         self._ders = ders
-        self._dlen = len(ders)
+        self._dlen = count
 
     def _evaluate(self, xi):
         """
