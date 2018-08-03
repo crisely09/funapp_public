@@ -6,6 +6,7 @@ from nose.tools import assert_raises
 
 from funapp.meijer import borel_trans_coeffs, consecutive_ratios_odd, rational_function_for_ratios
 from funapp.meijer import find_roots, gamma_products, meijerg_approx_low, aux_little_series
+from funapp.meijer import cma_solver
 
 
 def test_borel_trans_coeffs():
@@ -197,3 +198,24 @@ def test_example6():
     result0 = [0.990312240887789089 + 0.481308237536857j, 0.13677671640883210679 + 0.23483780883795517888j]
     assert (abs(zs - result0) < 1e-7).all
 test_example6()
+
+
+def check_cma():
+    """Check if cma module is available."""
+    try:
+        import cma
+    except ModuleNotFoundError:
+        return False
+    else:
+        return True
+
+
+def test_cma():
+    from scipy.optimize import rosen
+    x0 = [1.3, 0.7, 0.8, 1.9, 1.2]
+    results = cma_solver(rosen, x0)
+    assert results['success']
+    assert np.allclose(results['optvalue'], 0)
+    assert np.allclose(results['params'], np.ones(5))
+    assert results['message'] == 'Following termination conditions are satisfied: tolfun: 1e-11.'
+test_cma()

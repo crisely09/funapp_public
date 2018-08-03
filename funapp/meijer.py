@@ -115,8 +115,8 @@ def meijerg_approx_low(xs, ys, pl, ql, points):
                      \left( \left. \begin{matrix} 1, -y_1, \dots, - y_l \\
                      1, 1, - x_1 , \dots - x_l \end{matrix}\; \right| -\frac{q_l}{p_l g}\right)
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     xs : np.ndarray
         Roots of the numerator of the rational function for the ratios
         of the Borel transform coefficients
@@ -130,8 +130,8 @@ def meijerg_approx_low(xs, ys, pl, ql, points):
     points : np.ndarray
         Array with points where to evaluate the approximant.
 
-    Returns:
-    --------
+    Returns
+    -------
     result : np.ndarray
     """
     # Make the input lists for the Meijer G function in mpmath
@@ -154,5 +154,63 @@ def meijerg_approx_low(xs, ys, pl, ql, points):
     return result
 
 
-def meijerg_approximant():
-    """ """
+def cma_solver(objective, params, **kwargs):
+    """Minimize a function with the Covariance Matrix Adaptation Evolution Strategy.
+
+    This is a simplified version of the solver in fanpy: `wfns.solver.equation.cma`.
+
+    Parameters
+    ----------
+    objective : callable
+        The function to be minimized.
+    params : list or np.ndarray
+        Parameters of the objective function to be optimized.
+    kwargs : dict
+        Keyword argumets for `cma.fmin`. The defaults are taken from fanpy solver: `wfns.solver.equation.cma`
+        By default, 'sigma0' is set to 0.01 and 'options' to `{'ftarget': None, 'timeout': np.inf,
+        'tolfun': 1e-11, 'verb_filenameprefix': 'outcmaes', 'verb_log': 0}`.
+        The 'sigma0' is the initial standard deviation. The optimum is expected to be within
+        `3*sigma0` of the initial guess.
+        The 'ftarget' is the termination condition for the function value upper limit.
+        The 'timeout' is the termination condition for the time. It is provided in seconds and must
+        be provided as a string.
+        The 'tolfun' is the termination condition for the change in function value.
+        The 'verb_filenameprefix' is the prefix of the logger files that will be written to disk.
+        The 'verb_log' is the verbosity of the logger files that will be written to disk. `0` means
+        that no logs will be saved.
+        See `cma.evolution_strategy.cma_default_options` for more options.
+    
+    Returns
+    -------
+    Dictionary with the following keys and values:
+    success : bool
+        True if optimization succeeded.
+    optvalue : list
+        Returned value of the `cma.fmin`.
+    params : np.ndarray
+        Parameters at the end of the optimization.
+    message : str
+        Termination reason.
+    """
+    import cma
+
+    if kwargs == {}:
+        kwargs = {'sigma0': 0.01, 'options': {'ftarget': None, 'timeout': np.inf, 'tolfun': 1e-11,
+                                              'verb_filenameprefix': 'outcmaes', 'verb_log': 0}}
+
+    results = cma.fmin(objective, params, **kwargs)
+
+    output = {}
+    output['success'] = results[-3] != {}
+    output['params'] = results[0]
+    output['optvalue'] = results[1]
+
+    if output['success']:
+        output['message'] = ('Following termination conditions are satisfied:' +
+                             ''.join(' {0}: {1},'.format(key, val)
+                                     for key, val in results[-3].items()))
+        output['message'] = output['message'][:-1] + '.'
+    else:
+        output['message'] = 'Optimization did not succeed.'
+
+    return output
