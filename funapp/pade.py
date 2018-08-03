@@ -541,6 +541,7 @@ class GeneralPadeApproximant(PadeApproximant):
             selection : str or lists?
                 Which components to use.
         """
+        pass
 
     def _sort_coeffs_all(self, coeffs):
         """Sort the coefficients of the Pade Approximant.
