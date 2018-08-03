@@ -444,7 +444,6 @@ class GeneralPadeApproximant(PadeApproximant):
 
         # Solve for the coefficients
         result = np.linalg.lstsq(matrix, bvector)[0]
-        #result = np.linalg.solve(matrix, zeros)
         # Split the results for Pm and Qn, also reverse order
         # because the poly1d polynomials are order from high order
         # to low order (opposite as the Pade series)
