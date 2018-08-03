@@ -2,7 +2,8 @@
 
 
 import numpy as np
-import mpmath
+from mpmath import *
+mp.pretty = True
 
 from funapp.tools import factorial
 
@@ -12,7 +13,7 @@ def borel_trans_coeffs(zn):
 
     Parameters
     ----------
-    zn : np.ndarray
+    zn : np.ndarray (n,)
         Array with Taylor/Maclaurin series to be transformed.
 
     Returns
@@ -20,6 +21,8 @@ def borel_trans_coeffs(zn):
     bn : Array with the Borel transform coefficients :math:`b_n = z_n / n!`
 
     """
+    if not isinstance(zn, np.ndarray):
+        raise TypeError('Coefficients must be given in a numpy ndarray')
     bn = np.zeros(zn.shape)
     for i, z in enumerate(zn):
         bn[i] = z/factorial(i)
@@ -29,7 +32,7 @@ def borel_trans_coeffs(zn):
 def consecutive_ratios_odd(bn):
     """Get the consecutive ratios of Borel transform coefficients. """
     ratios_num = len(bn) - 1
-    rn = np.array([bn[i+1]/bn[i] for i in range(rations_num)])
+    rn = np.array([bn[i+1]/bn[i] for i in range(ratios_num)])
     return rn
 
 
@@ -42,23 +45,34 @@ def rational_function_for_ratios(rn):
         The consecutive ratios.
     
     """
+    if not isinstance(rn, np.ndarray):
+        raise TypeError('Ratios must be given in a numpy ndarray')
     ratios_num = len(rn)
     l = ratios_num / 2
-    npoints = ratios_num + 1
-    bvector = np.zeros(rn)
-    matrix = np.zeros((npoints, ratios_num))
+    npoints = ratios_num
+    bvector = np.zeros(ratios_num)
+    matrix = np.zeros((ratios_num, npoints))
     for i, r in enumerate(rn):
         # qm terms
         for j in range(l):
-            matrix[i, j] = r*(i**(j+1))
+            nterm = (i)**(j+1)
+            matrix[i, j] = r * nterm
         # pm terms
         for j in range(l, npoints):
-            matrix[i, j] = i**(j-l)
+            matrix[i, j] = -(i)**(j-l)
         bvector[i] = - r
     result = np.linalg.lstsq(matrix, bvector)[0]
     qs = result[:l]
     ps = result[l:]
     return ps, qs
+
+
+def aux_little_series(coeffs, n, linit, lfin):
+    """Auxiliary function for the rational function tests."""
+    result = 0.
+    for i, l in enumerate(range(linit, lfin+1)):
+        result += coeffs[i]*((n+1)**l)
+    return result
 
 
 def find_roots(poly_coeffs):
@@ -68,12 +82,11 @@ def find_roots(poly_coeffs):
     ----------
     poly_coeffs : np.ndarray
         The coefficients of a polynomial expansion.
-        Assumes the order increases through the array.
+        Assumes the order decreases through the array.
 
     """
     # Reverse order of coefficients to use poly1d
-    coeffs = poly_coeffs[::-1]
-    p = np.poly1d(coeffs)
+    p = np.poly1d(poly_coeffs)
     return p.roots
 
 
@@ -85,11 +98,11 @@ def gamma_products(xs, l):
     """
     result = 1
     for i in range(l):
-        result *= mpmath.gamma(xs[i])
+        result *= gamma(xs[i])
     return result
 
 
-def meijerg_approx(xs, ys, pl, ql, points):
+def meijerg_approx_low(xs, ys, pl, ql, points):
     r"""Return the value of the Meijer Approximant at some point(s).
 
     The Maijer approximant is a representation of the Laplace Transform:
@@ -122,13 +135,24 @@ def meijerg_approx(xs, ys, pl, ql, points):
     result : np.ndarray
     """
     # Make the input lists for the Meijer G function in mpmath
+    xs = xs[1:]
+    # Originals:
     lista = [[1], [-y for y in ys]]
     listb = [[1, 1]+[-x for x in xs], []]
+    #print "lista ", lista
+    #print "listb ", listb
     lpoints = len(points)
-    result = np.zeros(lpoints)
+    result = np.zeros(lpoints, dtype=np.complex_)
     # Compute the ratio of products of Gamma functions
-    const = gamma_products(-ys)/gamma_products(-xs)
+    const = gamma_products(-ys, len(ys))/gamma_products(-xs, len(xs))
+    #print "constant ", const
+    z = -ql/pl
+    #print 'inside', z
     for i in range(lpoints):
-        z = -ql/(pl * points[i])
-        result[i] = const * mpmath.meijerg(lista, listb, z)
+        ztmp = z/points[i]
+        result[i] = const * meijerg(lista, listb, ztmp)
     return result
+
+
+def meijerg_approximant():
+    """ """
