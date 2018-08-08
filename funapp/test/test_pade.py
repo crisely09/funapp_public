@@ -6,6 +6,7 @@ from nose.tools import assert_raises
 
 from funapp.base import BaseApproximant
 from funapp.pade import PadeApproximant, BasicPadeApproximant, GeneralPadeApproximant
+from funapp.pade import SelectivePadeApproximant
 from funapp.pade import add_prelated, add_qdenterms, add_qnumterms, clean_terms
 
 
@@ -142,3 +143,17 @@ def test_generalpade0():
 test_generalpade0()
 
 
+def test_selectivepade0():
+    """Test class methods."""
+    x = np.array([0.1, 1.2, 2.2, 3.5, 4.7, 5.3])
+    y = function_tests(x)
+    x = np.append(x, np.array(5.3))
+    y = np.append(y, derivative_tests(5.3))
+    ml = [0, 3]
+    nl = [1, 2, 3]
+    pade = SelectivePadeApproximant(x, y, ml, nl)
+    assert abs(pade([2.2]) - function_tests(2.2)) < 1e-2
+    assert abs(pade([3.5]) - function_tests(3.5)) < 1e-2
+    assert abs(pade([5.0], 1)[0] - (-0.01067)) < 1e-2
+
+test_selectivepade0()
