@@ -37,6 +37,8 @@ class PadeApproximant(BaseApproximant):
     __call__
     _evaluate
     _derivate
+    _store_derivatives
+    _sort_coeffs_all
 
     """
 
@@ -180,14 +182,18 @@ class PadeApproximant(BaseApproximant):
             c = term[3]
             # add P terms
             if a > 0:
-                tmp += self._pders[a-1](xi)
+                if (a-1) < len(self._pders):
+                    tmp += self._pders[a-1](xi)
             else:
                 tmp += self._p(xi)
             # Multiply by Q terms in numerator
             for t in qterms:
                 order, power = t
                 if order > 0:
-                    valueq = self._qders[order-1](xi)
+                    if (order-1) < len(self._qders):
+                        valueq = self._qders[order-1](xi)
+                    else:
+                        valueq = 0.0
                 else:
                     valueq = self._q(xi)
                 if power != 1:
@@ -353,14 +359,8 @@ class BasicPadeApproximant(PadeApproximant):
 
     """
     def __init__(self, x, y, ds, m):
+        PadeApproximant.__init__(self, x, y, m, m)
         self._dslen = len(ds)
-        if m + n <= self._xlen:
-            raise ValueError("To construct a [%d/%d] approximant at least\
-                    %d points are needed" % (m, n, m+n))
-        if m + n <= self._dslen:
-            raise ValueError("To construct a [%d/%d] approximant at least\
-                    %d Taylor coefficients are needed" % (m, n, m+n))
-        PadeApproximant.__init__(x, y, m, n)
 
         # Build approximant using poly1d objects
         # with the scipy method
@@ -393,7 +393,6 @@ class GeneralPadeApproximant(PadeApproximant):
     -------
     __call__
     _get_matrix_all
-    _get_matrix_select
     _sort_coeffs
     _evaluate
     _derivate
@@ -448,6 +447,8 @@ class GeneralPadeApproximant(PadeApproximant):
         # because the poly1d polynomials are order from high order
         # to low order (opposite as the Pade series)
         ps, qs = self._sort_coeffs_all(result)
+        ps = ps[::-1]
+        qs = qs[::-1]
         # Qn is missing the first term, b0 = 1, so append it now.
         qs = np.append(qs, np.array([1.0]))
 
@@ -462,12 +463,13 @@ class GeneralPadeApproximant(PadeApproximant):
         r"""Construct the matrix with all the series components.
 
         We use a linear solver giving a matrix A which rows are:
-        :math:`{-1, -x_k, -x_k^2, ..., -x_k^m, F(x_k), F(x_k)x_k, F(x_k)x_k^2, F(x_k)x_k^n}`
-        and solve: A x = 0,
+        :math:`{-1, -x_k, -x_k^2, ..., -x_k^m, F(x_k)x_k, F(x_k)x_k^2, F(x_k)x_k^n}`
+        and solve: A x = b,
         A includes the derivatives in the approximation:
         :math:`F(x + \epsilon)Q(x + \epsilon) \approx P(x + \epsilon)`
         where
         :math:`F(x + \epsilon) \approx F(x) \pm \frac{1}{2}\epsilon F'(x) + ...`
+        and :math:`b=-F(x)`.
 
         """
 
@@ -525,23 +527,6 @@ class GeneralPadeApproximant(PadeApproximant):
                     k += 1
         return matrix, b
 
-    def _get_matrix_select(self, selection='even'):
-        r"""Construct the matrix for some of the series components.
-
-        We use a linear solver giving a matrix A which rows are:
-        :math:`{1, F(x_k)x_k, -x_k, F(x_k)x_k^2, -x_k^2, ..., F(x_k)x_k^n, -x_k^m}`
-        and solve: A x = 0,
-        A includes the derivatives in the approximation:
-        :math:`F(x + \epsilon)Q(x + \epsilon) \approx P(x + \epsilon)`
-        where
-        :math:`F(x + \epsilon) \approx F(x) \pm \frac{1}{2}\epsilon F'(x) + ...`
-
-        Parrameters
-        -----------
-            selection : str or lists?
-                Which components to use.
-        """
-
     def _sort_coeffs_all(self, coeffs):
         """Sort the coefficients of the Pade Approximant.
 
@@ -558,6 +543,213 @@ class GeneralPadeApproximant(PadeApproximant):
             Coefficients for the denominator of the approximant.
 
         """
-        ps = coeffs[:self._m+1][::-1]
-        qs = coeffs[self._m+1:][::-1]
+        ps = coeffs[:self._m+1]
+        qs = coeffs[self._m+1:]
+        return ps, qs
+
+
+class SelectivePadeApproximant(PadeApproximant):
+    """Class for Pade Approximants generated without Taylor Series coefficients.
+
+    Attributes
+    ----------
+    _m, _n : int
+        Highest order of numerator and denominator series
+        of the Pade approximant.
+    _xlen : int
+        Length of the array with points.
+    _der : int or list(int)
+        If derivatives are provided,`_der` stores the values in a different
+        array.
+    eps : float
+        The little change to be made for the derivative approximation.
+
+    Methods
+    -------
+    __call__
+    _get_matrix_select
+    _sort_coeffs
+    _evaluate
+    _derivate
+
+    Example
+    -------
+    >>> x = [0., 1.5, 3.4]
+    >>> y = [-0.47, -0.48, -0.498]
+    >>> m = [0, 4]
+    >>> n = [1, 2, 3, 4]
+    >>> padegen = SelectivePadeApproximant(x, y, m, n)
+
+    Then we evaluate the function and its first derivative on a new set
+    of points xnew
+
+    >>> xnew = [2.0, 5.0]
+    >>> newdata = padegen(xnew, der=[0,1])
+    """
+
+    def __init__(self, x, y, ml, nl, eps=1e-3):
+        """Initialize Class for General Pade Approximants.
+
+        With general, we mean that we don't have a Taylor series, nor the derivatives
+        and the approximant is generated just from the given points and the
+        function evaluated at those points.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Points where the function was evaluated.
+        y : np.ndarray
+            Values of the function, and/or function
+            derivatives evaluated at `x`.
+        ml, nl : list of int
+            Orders of numerator and denominator series
+            of the Pade approximant.
+
+        """
+        # Check parameters
+        if not isinstance(ml, (list, int)):
+            raise TypeError('ml should be given as list of integers')
+        if not isinstance(nl, (list, int)):
+            raise TypeError('nl should be given as list of integers')
+        mlen = len(ml)
+        # Because the default already contains the order zero for the denominator
+        # if zero is in the list, take it off
+        if 0 in nl:
+            nl.remove(0)
+        nlen = len(nl)
+        # Initialize base class
+        PadeApproximant.__init__(self, x, y, max(ml), max(nl))
+        # Check number of points provided
+        if mlen + nlen > self._xlen:
+            raise ValueError("To construct a [%d/%d] approximant at least\
+                    %d points are needed" % (mlen, nlen, mlen+nlen))
+        self.eps = eps
+
+        # get matrix form
+        matrix, bvector = self._get_matrix_select(ml, nl, mlen, nlen)
+
+        # Solve for the coefficients
+        result = np.linalg.lstsq(matrix, bvector)[0]
+        # Split the results for Pm and Qn, also reverse order
+        # because the poly1d polynomials are order from high order
+        # to low order (opposite as the Pade series)
+        nums, denoms = self._sort_coeffs_selective(result, mlen)
+        ps = []; qs = []
+        # Add zeros por the powers not included in ml and nl
+        for i in range(self._m+1):
+            if i in ml:
+                ps.append(nums[ml.index(i)])
+            else:
+                ps.append(0)
+        # Qn is missing the first term, b0 = 1, so append it now.
+        qs.append(1.0)
+        for j in range(1 ,self._n+1):
+            if j in nl:
+                qs.append(denoms[nl.index(j)])
+            else:
+                qs.append(0)
+        ps = ps[::-1]
+        qs = qs[::-1]
+
+        # Build approximant using poly1d objects
+        self._p = np.poly1d(ps)
+        self._q = np.poly1d(qs)
+
+        # Save derivatives
+        self._store_derivatives()
+
+
+    def _get_matrix_select(self, ml, nl, mlen, nlen):
+        r"""Construct the matrix for some of the series components.
+
+        We use a linear solver giving a matrix A which rows are:
+        :math:`{1, F(x_k)x_k, -x_k, F(x_k)x_k^2, -x_k^2, ..., F(x_k)x_k^n, -x_k^m}`
+        and solve: A x = b,
+        A includes the derivatives in the approximation:
+        :math:`F(x + \epsilon)Q(x + \epsilon) \approx P(x + \epsilon)`
+        where
+        :math:`F(x + \epsilon) \approx F(x) \pm \frac{1}{2}\epsilon F'(x) + ...`
+        and b = - F(x)
+
+        Parameters
+        ----------
+        ml :  list of int
+            The powers to include in the numerator series
+        nl : list of int
+            Powers to include in the denominator series
+
+        Returns
+        -------
+        matrix : np.ndarray((npoints, lenpars))
+            Matrix to use for solving the linear equations
+        b : np.ndarray(npoints)
+            b vector for the linear equations
+        """
+        # Fill out the matrix for the function values
+        lenpars = mlen +  nlen + 1
+        npoints = self._xlen
+        matrix = np.zeros((npoints, lenpars))
+        b = np.zeros(npoints)
+        for i, point in enumerate(self._x):
+            # Set values related with the numerator P_m(x)
+            # NOTE: As Pm series has a_0, we have m+1 terms
+            prefac = point
+            for j, mpower in enumerate(ml):
+                matrix[i, j] = - (prefac**mpower)
+            # Set values related with the denominator Q_n(x)
+            # NOTE: b_0 = 1, so we only have n terms
+            prefac = self._y[i]
+            for j, npower in enumerate(nl):
+                matrix[i, mlen+j] = prefac * (point**npower)
+            b[i] = - self._y[i]
+
+        # If derivatives provided, get the extra matrix elements
+        # Fill out the matrix for the derivatives
+        if self._ders:
+            # New starting point
+            k = len(self._x)
+            eps = self.eps
+            for der in self._ders:
+                derlist = []
+                derlist.append(self._y[np.where(der[0]==self._x)])
+                higher_der = [dval for dval in der[1]]
+                derlist += higher_der
+                lder = len(derlist)-1
+                for i in range(lder):
+                    # Use the space in the matrix after the points
+                    sgn = (-1)**i
+                    if (i+1)%2 == 0:
+                        eps += eps
+                    newx = der[0] + sgn*eps
+                    newy = taylor(derlist, lder, eps, sgn)
+                    # Set values related with the numerator P_m(x)
+                    prefac = newx
+                    for j, mpower in enumerate(ml):
+                        matrix[k, j] = - (prefac**mpower)
+                    # Set values related with the denominator Q_n(x)
+                    b[k] = - newy
+                    prefac = newy
+                    for j, npower in enumerate(nl):
+                        matrix[k, mlen+j] = prefac * (newx**npower)
+                    k += 1
+        return matrix, b
+
+    def _sort_coeffs_selective(self, coeffs, mlen):
+        """Sort the coefficients of the Pade Approximant.
+
+        Arguments
+        ---------
+        coeffs : np.ndarray(self._xlen)
+            Results from the linear solver.
+
+        Returns
+        -------
+        ps : np.ndarray(m)
+            Coefficients for the numerator of the approximant.
+        qs : np.ndarray(n)
+            Coefficients for the denominator of the approximant.
+
+        """
+        ps = coeffs[:mlen]
+        qs = coeffs[mlen:]
         return ps, qs

@@ -102,7 +102,7 @@ def gamma_products(xs, l):
     return result
 
 
-def meijerg_approx_low(xs, ys, pl, ql, points):
+def meijerg_approx_low(xs, ys, pl, ql, points, maxterms=None):
     r"""Return the value of the Meijer Approximant at some point(s).
 
     The Maijer approximant is a representation of the Laplace Transform:
@@ -150,7 +150,10 @@ def meijerg_approx_low(xs, ys, pl, ql, points):
     #print 'inside', z
     for i in range(lpoints):
         ztmp = z/points[i]
-        result[i] = const * meijerg(lista, listb, ztmp)
+        if maxterms is None:
+            result[i] = const * meijerg(lista, listb, ztmp)
+        else:
+            result[i] = const * meijerg(lista, listb, ztmp, maxterms=maxterms)
     return result
 
 
