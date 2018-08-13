@@ -2,7 +2,7 @@
 
 import numpy as np
 from numpy.testing import assert_raises
-from funapp.tools import factorial, taylor
+from funapp.tools import factorial, taylor, taylor_coeffs
 
 
 
@@ -50,3 +50,34 @@ def test_taylor():
     assert abs(result0 - result1) < 1e-6
 
 test_taylor()
+
+def test_taylor_coeffs():
+    """Check the Taylor expansion constructor."""
+    def func(points):
+        """Test function."""
+        return points**3
+
+    def first_der(points):
+        """Derivative of function."""
+        return 3.0 * points**2.0
+
+    def second_der(points):
+        """Second derivative of function."""
+        return 6.0 * points
+
+    points = np.array([1.2, 1.4, 2.5])
+    fnvals = func(points)
+    ders1 = first_der(points)
+    ders2 = second_der(points)
+    ders = [fnvals[0], ders1[0], ders2[0]]
+    # Check parameters
+    assert_raises(TypeError, taylor_coeffs, 's', 2)
+    assert_raises(TypeError, taylor_coeffs, ders, 2.0)
+    assert_raises(ValueError, taylor_coeffs, [fnvals[0], ders1[0]], 2)
+
+    point = np.array([1.])
+    ders = [func(point), first_der(point), second_der(point)]
+    coeffs = taylor_coeffs(ders, 2)
+    assert np.allclose(coeffs, [1.0, 3.0, 3.0])
+
+test_taylor_coeffs()

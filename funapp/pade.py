@@ -182,14 +182,18 @@ class PadeApproximant(BaseApproximant):
             c = term[3]
             # add P terms
             if a > 0:
-                tmp += self._pders[a-1](xi)
+                if (a-1) < len(self._pders):
+                    tmp += self._pders[a-1](xi)
             else:
                 tmp += self._p(xi)
             # Multiply by Q terms in numerator
             for t in qterms:
                 order, power = t
                 if order > 0:
-                    valueq = self._qders[order-1](xi)
+                    if (order-1) < len(self._qders):
+                        valueq = self._qders[order-1](xi)
+                    else:
+                        valueq = 0.0
                 else:
                     valueq = self._q(xi)
                 if power != 1:
@@ -355,14 +359,8 @@ class BasicPadeApproximant(PadeApproximant):
 
     """
     def __init__(self, x, y, ds, m):
+        PadeApproximant.__init__(self, x, y, m, m)
         self._dslen = len(ds)
-        if m + n <= self._xlen:
-            raise ValueError("To construct a [%d/%d] approximant at least\
-                    %d points are needed" % (m, n, m+n))
-        if m + n <= self._dslen:
-            raise ValueError("To construct a [%d/%d] approximant at least\
-                    %d Taylor coefficients are needed" % (m, n, m+n))
-        PadeApproximant.__init__(x, y, m, n)
 
         # Build approximant using poly1d objects
         # with the scipy method

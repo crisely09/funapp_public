@@ -100,3 +100,35 @@ def taylor(ders, n, eps, sgn):
     for i in range(1, n+1):
         result += (sgn**(i) * eps**(i) * ders[i])/(factorial(i))
     return result
+
+
+def taylor_coeffs(ders, n):
+    r"""Return Taylor series coefficients up to n-term.
+
+    The Taylor series centered at 0 (Maclaurin series):
+    :math:`F(x) = F(0) + F'(0)x + 1/2 F''(0) x^2 + ...`
+
+    As the derivatives are given already evaluated at some point, this
+    funtion serves only to organize the coefficients {F(0), F'(0), 1/2 F''(0)}
+    in a list/array.
+
+    Parameters
+    ----------
+    ders :  array-like, float
+        Values of the function derivatives, including 0th derivative.
+    n :  int
+        Order of the Taylor expansion
+
+    """
+    if isinstance(ders, list):
+        ders = np.array(ders, dtype=float)
+    elif not isinstance(ders, np.ndarray):
+        raise TypeError('ders should be given as list or np.ndarray')
+    if not isinstance(n, int):
+        raise TypeError('n must be integer.')
+    if n != len(ders)-1:
+        raise ValueError('The number of derivatives does not match with the order of the Taylor series.')
+    coeffs = np.zeros(n+1)
+    for i in range(n+1):
+        coeffs[i] = (ders[i])/(factorial(i))
+    return coeffs

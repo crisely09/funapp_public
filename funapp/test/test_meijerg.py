@@ -2,11 +2,14 @@
 
 
 import numpy as np
+from scipy import misc
 from nose.tools import assert_raises
 
 from funapp.meijer import borel_trans_coeffs, consecutive_ratios_odd, rational_function_for_ratios
 from funapp.meijer import find_roots, gamma_products, meijerg_approx_low, aux_little_series
 from funapp.meijer import cma_solver
+from funapp.pade import GeneralPadeApproximant, BasicPadeApproximant
+from funapp.tools import factorial, taylor_coeffs
 
 
 def test_borel_trans_coeffs():
@@ -67,6 +70,160 @@ def test_gamma_product():
 
 test_gamma_product()
 
+def test_meijerg_ex():
+    """Test a Meijer-G approximant of a Meijer-G function."""
+    # e^x = 1 + x + 1/2 x^2 + 1/6 x^3 + 1/24 x^4 + ...
+    tcoeffs = np.array([1, 1, 1./2., 1./6., 1./24.])
+    borel = borel_trans_coeffs(tcoeffs)
+    ratios = consecutive_ratios_odd(borel)
+    ps, qs = rational_function_for_ratios(ratios)
+    # Add the constant 1. to the qm coefficients
+    ps = ps[::-1]
+    qs = qs[::-1]
+    qs = np.append(qs, np.array(1.))
+    rootsp = find_roots(ps)
+    rootsq = find_roots(qs)
+    xvector = np.append(np.array([1]), rootsp)
+    yvector = rootsq
+    pl = ps[0]
+    ql = qs[0]
+    points = np.array([1.2, -1.4])
+    result0 = np.exp(points)
+    zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
+    assert (abs(result0 - np.real(zs)) < 1e-7).all()
+test_meijerg_ex()
+
+
+def test_maijerg_ex_frompade():
+    """Test a Meijer-G approximant of a Meijer-G function."""
+    # e^x = 1 + x + 1/2 x^2 + 1/6 x^3 + 1/24 x^4 + ...
+    tcoeffs = np.array([1, 1, 1./2., 1./6., 1./24.+ 1./120., 1/factorial(6.), 1/factorial(7.)])
+    p, q = misc.pade(tcoeffs, 3)
+    points = np.array([0.8, 0.5, 0.2, -0.5, -0.8, -1.0])
+    y = np.exp(points)
+    basic_pade = BasicPadeApproximant(points, y, tcoeffs, 3)
+    tcoeffs_pade = taylor_coeffs(basic_pade(np.array([0.]), range(4)), 3)
+    borel = borel_trans_coeffs(tcoeffs_pade)
+    ratios = consecutive_ratios_odd(borel)
+    ps, qs = rational_function_for_ratios(ratios)
+    # Add the constant 1. to the qm coefficients
+    ps = ps[::-1]
+    qs = qs[::-1]
+    qs = np.append(qs, np.array(1.))
+    rootsp = find_roots(ps)
+    rootsq = find_roots(qs)
+    xvector = np.append(np.array([1]), rootsp)
+    yvector = rootsq
+    pl = ps[0]
+    ql = qs[0]
+    #print tcoeffs_pade
+    zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
+    #print "from pade ", p(points)/q(points)
+    #print "result 0", y
+    #print "result 1 ", zs
+    assert (abs(y - np.real(zs)) < 1e-2).all()
+#test_maijerg_ex_frompade()
+
+
+def optimize_pars_meijerg(xvec, yvec, pl, ql, points, vals):
+    from scipy import optimize
+    xlen = len(xvec)
+    ylen = len(yvec)
+    plql = np.array([pl, ql])
+    pars = np.append(xvec, yvec)
+    pars = np.append(pars, plql)
+    def opt_meijer(pars):
+        xvector = pars[:xlen]
+        yvector = pars[xlen:xlen+ylen]
+        print "xvec ", xvector
+        print "yvec ", yvector
+        pl = pars[-2]
+        ql = pars[-1]
+        print "pl ", pl
+        print "ql ", ql
+        zs = meijerg_approx_low(xvector, yvector, pl, ql, points, maxterms=800)
+        print "norm",  np.linalg.norm(vals - np.real(zs))
+        return np.linalg.norm(vals - zs)
+    #good_pars = cma_solver(opt_meijer, pars)
+    good_pars = optimize.minimize(opt_meijer, pars)
+
+
+    
+
+def test_maijerg_ex_recursive():
+    """Test a Meijer-G approximant of a Meijer-G function."""
+    # e^-x = 1 - x + 1/2 x^2 - 1/6 x^3 + 1/24 x^4 - ...
+    # First construct Meijer-G from Taylor expansion
+    tcoeffs = np.array([1, -1, 1./2., -1./6., 1./24.])
+    borel = borel_trans_coeffs(tcoeffs)
+    ratios = consecutive_ratios_odd(borel)
+    ps, qs = rational_function_for_ratios(ratios)
+
+    # Add the constant 1. to the qm coefficients
+    ps = ps[::-1]
+    qs = qs[::-1]
+    qs = np.append(qs, np.array(1.))
+    rootsp = find_roots(ps)
+    rootsq = find_roots(qs)
+    xvector = np.append(np.array([1]), rootsp)
+    yvector = rootsq
+    pl = ps[0]
+    ql = qs[0]
+    points = np.array([0.01, 0.1, 0.15, 0.21, 0.28, 0.34, 0.36, 0.49, 0.6, 0.85])
+    result0 = np.exp(-points)
+    print result0
+    zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
+    print "initial Meijer-G ", zs
+
+    # Then make a Pade out of the Meijer-G results
+    gen_pade = GeneralPadeApproximant(points, np.real(zs), 5, 5)
+    tcoeffs_pade = taylor_coeffs(gen_pade(np.array([0.]), range(5)), 4)
+    borel1 = borel_trans_coeffs(tcoeffs_pade)
+    ratios1 = consecutive_ratios_odd(borel)
+    ps1, qs1 = rational_function_for_ratios(ratios)
+    # Add the constant 1. to the qm coefficients
+    ps1 = ps1[::-1]
+    qs1 = qs1[::-1]
+    qs1 = np.append(qs, np.array(1.))
+    rootsp1 = find_roots(ps1)
+    rootsq1 = find_roots(qs1)
+    xvector1 = np.append(np.array([1]), rootsp1)
+    yvector1 = rootsq1
+    pl1 = ps1[0]
+    ql1 = qs1[0]
+    #print tcoeffs_pade
+    zs1 = meijerg_approx_low(xvector1, yvector1, pl1, ql1, points)
+    print "result 1 ", zs1
+    optimize_pars_meijerg(xvector1, yvector1, pl1, ql1, points, result0)
+    #print "from pade ", p(points)/q(points)
+    #print "result 0", y
+#test_maijerg_ex_recursive()
+
+
+def test_meijerg_1o1x():
+    """Test a Meijer-G approximant of a Meijer-G function."""
+    # 1/1-x = 1+ x + x^2 + x^3 + x^4 + ...
+    tcoeffs = np.array([1., 1., 1., 1., 1., 1., 1.])
+    borel = borel_trans_coeffs(tcoeffs)
+    ratios = consecutive_ratios_odd(borel)
+    ps, qs = rational_function_for_ratios(ratios)
+    # Add the constant 1. to the qm coefficients
+    ps = ps[::-1]
+    qs = qs[::-1]
+    qs = np.append(qs, np.array(1.))
+    rootsp = find_roots(ps)
+    rootsq = find_roots(qs)
+    xvector = np.append(np.array([1]), rootsp)
+    yvector = rootsq
+    pl = ps[0]
+    ql = qs[0]
+    points = np.array([0.25, -0.41])
+    result0 = 1. /(1. - points)
+    zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
+    assert (abs(result0 - np.real(zs)) < 1e-7).all()
+#test_meijerg_1o1x()
+
+
 def test_meijerg():
     """Test Meijer-G approximant, comparing with results from the paper of Mera 2018."""
     ratios = np.array([-1./8., -35./96., -11./24.])
@@ -83,7 +240,7 @@ def test_meijerg():
     ql = qs[0]
     points = np.array([-1+0j, -10+0j, -100+0j])
     zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
-    print zs
+    #print zs
     assert (zs - [1.133285+0.144952j, 0.744345+0.436317j, 0.386356+0.321210j] < 1e-6).all()
 #test_meijerg()
 
@@ -218,4 +375,4 @@ def test_cma():
     assert np.allclose(results['optvalue'], 0)
     assert np.allclose(results['params'], np.ones(5))
     assert results['message'] == 'Following termination conditions are satisfied: tolfun: 1e-11.'
-test_cma()
+#test_cma()
