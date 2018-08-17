@@ -198,8 +198,9 @@ def cma_solver(objective, params, **kwargs):
     import cma
 
     if kwargs == {}:
-        kwargs = {'sigma0': 0.01, 'options': {'ftarget': None, 'timeout': np.inf, 'tolfun': 1e-11,
-                                              'verb_filenameprefix': 'outcmaes', 'verb_log': 0}}
+        kwargs = {'sigma0': 0.5, 'options': {'ftarget': 1e-8, 'tolfun': 1e-8,
+                                              'maxiter':15, 'verb_filenameprefix': 'outcmaes',
+                                              'verb_log': 0}}
 
     results = cma.fmin(objective, params, **kwargs)
 

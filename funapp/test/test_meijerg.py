@@ -3,6 +3,7 @@
 
 import numpy as np
 from scipy import misc
+import mpmath
 from nose.tools import assert_raises
 
 from funapp.meijer import borel_trans_coeffs, consecutive_ratios_odd, rational_function_for_ratios
@@ -19,7 +20,7 @@ def test_borel_trans_coeffs():
     result0 = [0.4, 0.6, 0.4, 0.166667, 0.05, 0.0116667, 0.00222222]
     assert np.allclose(borel, result0)
 
-test_borel_trans_coeffs()
+#test_borel_trans_coeffs()
 
 def test_consecutive_ratios_odd():
     """Test consecutive ratios of Borel coefficients for the case with a series of odd order.
@@ -30,7 +31,7 @@ def test_consecutive_ratios_odd():
     result0 = [0.6/0.4, 0.4/0.6, 0.166667/0.4, 0.05/0.166667, 0.0116667/0.05, 0.00222222/0.0116667]
     assert np.allclose(ratios, result0)
 
-test_consecutive_ratios_odd()
+#test_consecutive_ratios_odd()
 
 def test_rational_function_for_ratios():
     """Test the rational function fit for the consecutive ratios of Borel coefficients."""
@@ -41,7 +42,7 @@ def test_rational_function_for_ratios():
     assert np.allclose(ps, [-1./8., -113./216])
     assert np.allclose(qs, [7./9])
 
-test_rational_function_for_ratios()
+#test_rational_function_for_ratios()
 
 def test_find_roots():
     """Test of the wrapper function to find the roots of a polynomial."""
@@ -57,7 +58,7 @@ def test_find_roots():
     assert np.allclose(rootsp, [- ps[1]/ps[0]])
     assert np.allclose(rootsq, [-1/qs[0]])
 
-test_find_roots()
+#test_find_roots()
 
 def test_gamma_product():
     """Test for the Gamma function products"""
@@ -68,7 +69,7 @@ def test_gamma_product():
     assert abs(result01 - 0.89974717650283) < 1e-9
     assert abs(result02 - 3.803298638983) < 1e-9
 
-test_gamma_product()
+#test_gamma_product()
 
 def test_meijerg_ex():
     """Test a Meijer-G approximant of a Meijer-G function."""
@@ -91,7 +92,7 @@ def test_meijerg_ex():
     result0 = np.exp(points)
     zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
     assert (abs(result0 - np.real(zs)) < 1e-7).all()
-test_meijerg_ex()
+#test_meijerg_ex()
 
 
 def test_maijerg_ex_frompade():
@@ -135,17 +136,30 @@ def optimize_pars_meijerg(xvec, yvec, pl, ql, points, vals):
     def opt_meijer(pars):
         xvector = pars[:xlen]
         yvector = pars[xlen:xlen+ylen]
-        print "xvec ", xvector
-        print "yvec ", yvector
+        #print "xvec ", xvector
+        #print "yvec ", yvector
         pl = pars[-2]
         ql = pars[-1]
-        print "pl ", pl
-        print "ql ", ql
-        zs = meijerg_approx_low(xvector, yvector, pl, ql, points, maxterms=800)
-        print "norm",  np.linalg.norm(vals - np.real(zs))
-        return np.linalg.norm(vals - zs)
-    #good_pars = cma_solver(opt_meijer, pars)
+        #print "pl ", pl
+        #print "ql ", ql
+        try:
+            zs = meijerg_approx_low(xvector, yvector, pl, ql, points, maxterms=1000)
+            if (zs != np.inf).any() or (zs != np.nan).any():
+                error = np.power(np.linalg.norm(vals - np.real(zs)), 2)
+                print "Error: ", error
+                print "zs ", np.real(zs)
+                return error
+            else:
+                return 1000.00
+        except mpmath.libmp.libhyper.NoConvergence:
+            return 100.00
+
+    #result = cma_solver(opt_meijer, pars)
+    #good_pars = result['params']
+    #optz = result['optvalue']
+    #return good_pars, optz
     good_pars = optimize.minimize(opt_meijer, pars)
+    return good_pars
 
 
     
@@ -169,15 +183,15 @@ def test_maijerg_ex_recursive():
     yvector = rootsq
     pl = ps[0]
     ql = qs[0]
-    points = np.array([0.01, 0.1, 0.15, 0.21, 0.28, 0.34, 0.36, 0.49, 0.6, 0.85])
+    points = np.array([0.01, 0.1, 0.15, 0.21, 0.23, 0.29, 0.31, 0.32, 0.3, 0.25])
     result0 = np.exp(-points)
     print result0
     zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
     print "initial Meijer-G ", zs
 
     # Then make a Pade out of the Meijer-G results
-    gen_pade = GeneralPadeApproximant(points, np.real(zs), 5, 5)
-    tcoeffs_pade = taylor_coeffs(gen_pade(np.array([0.]), range(5)), 4)
+    gen_pade = GeneralPadeApproximant(points, np.real(zs), 4, 6)
+    tcoeffs_pade = taylor_coeffs(gen_pade(np.array([0.]), range(6)), 5)
     borel1 = borel_trans_coeffs(tcoeffs_pade)
     ratios1 = consecutive_ratios_odd(borel)
     ps1, qs1 = rational_function_for_ratios(ratios)
@@ -193,11 +207,15 @@ def test_maijerg_ex_recursive():
     ql1 = qs1[0]
     #print tcoeffs_pade
     zs1 = meijerg_approx_low(xvector1, yvector1, pl1, ql1, points)
-    print "result 1 ", zs1
-    optimize_pars_meijerg(xvector1, yvector1, pl1, ql1, points, result0)
-    #print "from pade ", p(points)/q(points)
-    #print "result 0", y
-#test_maijerg_ex_recursive()
+    print "True result", result0
+    print "from pade ", gen_pade(points)
+    print "result 1 ", np.real(zs1)
+    #y, optz = optimize_pars_meijerg(xvector1, yvector1, pl1, ql1, points, result0)
+    #print "result value", optz
+    y = optimize_pars_meijerg(xvector1, yvector1, pl1, ql1, points, result0)
+    print "result params", y
+    print "True result", result0
+test_maijerg_ex_recursive()
 
 
 def test_meijerg_1o1x():
@@ -289,7 +307,7 @@ def test_example3():
     zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
     assert abs(1 - zs) < 1e-3
 
-test_example3()
+#test_example3()
 
 def test_example4():
     coeffs = np.array([1, -0.667, 0.556, -2.056])
@@ -333,7 +351,7 @@ def test_example5():
     zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
     result0 = [0.473794 + 0.368724j, 0.255694 + 0.228610j, 0.144490 + 0.133539j]
     assert (abs(zs - result0) < 1e-6).all()
-test_example5()
+#test_example5()
 
 def test_example6():
     coeffs = np.array([1, 1/2., 9/8., 75/16.])
@@ -354,7 +372,7 @@ def test_example6():
     zs = meijerg_approx_low(xvector, yvector, pl, ql, points)
     result0 = [0.990312240887789089 + 0.481308237536857j, 0.13677671640883210679 + 0.23483780883795517888j]
     assert (abs(zs - result0) < 1e-7).all
-test_example6()
+#test_example6()
 
 
 def check_cma():
