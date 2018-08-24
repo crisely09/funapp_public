@@ -6,7 +6,8 @@ from nose.tools import assert_raises
 
 from funapp.base import BaseApproximant
 from funapp.pade import PadeApproximant, BasicPadeApproximant, GeneralPadeApproximant
-from funapp.pade import SelectivePadeApproximant
+from funapp.pade import SelectivePadeApproximant, LSQSelPadeApproximant
+from funapp.pade import ChebyshevSelPadeApproximant
 from funapp.pade import add_prelated, add_qdenterms, add_qnumterms, clean_terms
 
 
@@ -181,7 +182,7 @@ def test_generalpade_derivatives():
     assert np.allclose(der1, ders[1])
     assert np.allclose(der2, ders[2])
 
-test_generalpade_derivatives()
+#test_generalpade_derivatives()
 
 
 def test_selectivepade0():
@@ -198,3 +199,39 @@ def test_selectivepade0():
     assert abs(pade([5.0], 1)[0] - (-0.01067)) < 1e-2
 
 #test_selectivepade0()
+def test_lsqrselectivepade0():
+    """Test class methods."""
+    x = np.array([0.1, 1.2, 2.2, 3.5, 4.7, 5.3])
+    y = function_tests(x)
+    x = np.append(x, np.array(5.3))
+    y = np.append(y, derivative_tests(5.3))
+    ml = [0, 3]
+    nl = [1, 2, 3]
+    pade = LSQSelPadeApproximant(x, y, ml, nl)
+    assert abs(pade([2.2]) - function_tests(2.2)) < 1e-2
+    assert abs(pade([3.5]) - function_tests(3.5)) < 1e-2
+    assert abs(pade([5.0], 1)[0] - (-0.01067)) < 1e-2
+
+#test_lsqrselectivepade0()
+
+def test_chebyshevpade0():
+    """Test the Scaled Chebyshev Pade approximant"""
+    x = np.array([0.1, 1.2, 2.2, 3.5, 4.7, 5.3])
+    y = function_tests(x)
+    ml = [0, 3]
+    nl = [1, 2, 3]
+    pade = ChebyshevSelPadeApproximant(x, y, ml, nl)
+    print pade._ps
+    print pade._qs
+    print y - pade(x)[0]
+ #  # add point
+ #  pade.add_point(5.8, function_tests(5.8))
+ #  print pade._ps
+ #  print pade._qs
+ #  print y - pade(x)[0]
+ #  pade.add_order(1, 'numerator')
+ #  print pade._ps
+ #  print pade._qs
+ #  print y - pade(x)[0]
+ #  # works, it gets better each time!
+test_chebyshevpade0()

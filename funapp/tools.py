@@ -68,6 +68,12 @@ def factorial(n):
         return n*factorial(n-1)
 
 
+def choose_function(k, n):
+    """Evaluate k choose n."""
+    result = factorial(k)/factorial(k-n)/factorial(n)
+    return result
+
+
 def taylor(ders, n, eps, sgn):
     r"""Evaluate the Taylor series up to n-term.
 
@@ -171,7 +177,8 @@ def fit_pseudosemivariance(xdata, ydata):
     def semivariance(x, szero, sexponent):
         """Function defining the semivariance for optimizer"""
         return szero*(1 - np.exp(-sexponent * (x**2)))
-    szero, sexponent = optimize.curve_fit(semivariance, distance_x, distance_y)[0]
+    result = optimize.curve_fit(semivariance, distance_x, distance_y)
+    szero, sexponent = result[0]
     return szero, sexponent
 
 
@@ -203,7 +210,7 @@ def variance_column(xdata, point, szero, sexponent):
     column = np.zeros(lcolumn)
     for i in range(lcolumn):
         column[i] = szero*np.exp(-sexponent*((xdata[i] - point)**2))
-    column = np.append(column, np.ones(1))
+    column = np.append(column, 1)
     return column
 
 
@@ -278,3 +285,9 @@ def estimate_standard_deviation(xdata, newpoint, szero, sexponent):
     cnew = szero
     sigma = np.sqrt(ws_cmatrix_ws - 2*np.dot(vnew[:ldata], ws) + cnew)
     return sigma
+
+
+def finite_difference(function, point, eps=1e-3):
+    """Extremetly simple finite difference approxiation."""
+    der = (function(point+eps) - function(point))/eps
+    return der
