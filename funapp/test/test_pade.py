@@ -7,7 +7,7 @@ from nose.tools import assert_raises
 from funapp.base import BaseApproximant
 from funapp.pade import PadeApproximant, BasicPadeApproximant, GeneralPadeApproximant
 from funapp.pade import SelectivePadeApproximant, LSQSelPadeApproximant
-from funapp.pade import ChebyshevSelPadeApproximant
+from funapp.pade import ChebyshevSelPadeApproximant, ChebyshevPadeApproximant
 from funapp.pade import add_prelated, add_qdenterms, add_qnumterms, clean_terms
 
 
@@ -214,7 +214,7 @@ def test_lsqrselectivepade0():
 
 #test_lsqrselectivepade0()
 
-def test_chebyshevpade0():
+def test_chebyshevselpade0():
     """Test the Scaled Chebyshev Pade approximant"""
     x = np.array([0.1, 1.2, 2.2, 3.5, 4.7, 5.3])
     y = function_tests(x)
@@ -234,4 +234,17 @@ def test_chebyshevpade0():
  #  print pade._qs
  #  print y - pade(x)[0]
  #  # works, it gets better each time!
+#test_chebyshevselpade0()
+
+def test_chebyshevpade0():
+    """Test the Scaled Chebyshev Pade approximant- all terms"""
+    print "This test"
+    x = np.array([0.1, 1.2, 2.2, 3.5, 4.7, 5.3, 5.6])
+    y = function_tests(x)
+    m = 3
+    n = 3
+    pade = ChebyshevPadeApproximant(x, y, m, n)
+    print pade._ps
+    print pade._qs
+    print y - pade(x)[0]
 test_chebyshevpade0()

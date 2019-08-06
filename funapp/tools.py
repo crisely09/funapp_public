@@ -4,7 +4,7 @@ import numpy as np
 import itertools
 from scipy import optimize
 
-__all__ = ['check_input', 'clean_arrays']
+#__all__ = ['check_input', 'clean_arrays']
 
 
 def check_input(x, y):
@@ -140,6 +140,11 @@ def taylor_coeffs(ders, n):
     for i in range(n+1):
         coeffs[i] = (ders[i])/(factorial(i))
     return coeffs
+
+
+def chebypoly(xdata, coeffs):
+    """Evaluate the sum of Chebyshev polynomials using numpy chebval."""
+    return np.polynomial.chebyshev.chebval(xdata, coeffs)
 
 
 def fit_pseudosemivariance(xdata, ydata):
@@ -283,7 +288,13 @@ def estimate_standard_deviation(xdata, newpoint, szero, sexponent):
     # Computation of sigma
     ws_cmatrix_ws = np.dot(ws, np.dot(n_cmatrix, ws))
     cnew = szero
-    sigma = np.sqrt(ws_cmatrix_ws - 2*np.dot(vnew[:ldata], ws) + cnew)
+    variance = ws_cmatrix_ws - 2*np.dot(vnew[:ldata], ws) + cnew
+    if variance < -1e-10:
+        print "variance ", variance
+        raise ValueError('Variance is negative.')
+    else:
+        variance = abs(variance)
+    sigma = np.sqrt(variance)
     return sigma
 
 
@@ -291,3 +302,27 @@ def finite_difference(function, point, eps=1e-3):
     """Extremetly simple finite difference approxiation."""
     der = (function(point+eps) - function(point))/eps
     return der
+
+
+def erms(model, points, refvalues, eps):
+    """Compute the root-mean-square error of a model.
+
+    Parameters
+    ----------
+    model : callable, BaseApproximant
+        The model approximation to a function.
+    points : array, float
+        The points used to fit the model.
+    refvalues : array, float
+        The values of the reference function evaluated at
+        the points given.
+    eps : array, float
+        The uncertainty in the reference values.
+    """
+    vmodel = model(points)[0]
+    npoints = len(points)
+    erms = 0.0
+    for i in range(npoints):
+        erms += ((vmodel[i] - refvalues[i])/eps[i])**2
+    erms = np.sqrt((1./(npoints + 1.))*erms)
+    return erms

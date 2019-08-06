@@ -10,7 +10,8 @@ from funapp.base import BaseApproximant
 from funapp.tools import taylor
 
 __all__ = ['PadeApproximant', 'BasicPadeApproximant', 'GeneralPadeApproximant', 'LSQPadeApproximant',
-           'LSQSelPadeApproximant', 'ChebyshevApproximant', 'ChebyshevSelPadeApproximant',]
+           'LSQSelPadeApproximant', 'ChebyshevApproximant', 'ChebyshevSelPadeApproximant',
+           'ChebyshevPadeApproximant',]
 
 class PadeApproximant(BaseApproximant):
     """
@@ -1167,7 +1168,7 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
     >>> newdata = padegen(xnew)
     """
 
-    def __init__(self, x, y, ml, nl):
+    def __init__(self, x, y, ml, nl, factor=1.0):
         """Initialize Class for scaled Chebyshev Pade Approximants.
 
         With general, we mean that we don't have a Taylor series, nor the derivatives
@@ -1206,6 +1207,7 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
         # Save the lists
         self.ml = ml
         self.nl = nl
+        self.factor = factor
 
         # Create model
         self.update_approximant()
@@ -1224,13 +1226,24 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
         Array with values of the approximant evaluated at x.
 
         """
-        ctmp = np.zeros(self._m - 1)
         lastnum = self._ps[-1]
+        lastc = np.zeros(self._m+1)
+        lastc[-1] = lastnum
+        cn = self._ps[:self._m]
+        nresult = np.polynomial.chebyshev.chebval(x/self._xmax, cn)
+        # p_n * T_{n-2}*n
+        ctmp = np.zeros(self._m - 1)
         ctmp[-1] = self._m*lastnum
-        result = np.polynomial.chebyshev.chebval(x/self._xmax, self._ps)
-        result += np.polynomial.chebyshev.chebval(x/self._xmax, ctmp)
-        result /= (1 + np.polynomial.chebyshev.chebval(x/self._xmax, self._qs))
-        return result
+        nresult += self.factor*np.polynomial.chebyshev.chebval(x/self._xmax, ctmp)
+        # p_n * T_{n}
+        nresult += self.factor*np.polynomial.chebyshev.chebval(x/self._xmax, lastc)
+        # 1 + q_n T_{}
+        lastd = np.zeros(self._n+1)
+        lastd[-1] = self._qs[-1]
+        cd = self._qs[:self._n]
+        dresult = 1 + np.polynomial.chebyshev.chebval(x/self._xmax, cd)
+        dresult += self.factor*np.polynomial.chebyshev.chebval(x/self._xmax, lastd)
+        return nresult/dresult
 
     def update_approximant(self):
         """From the current information update the approximant coefficients.
@@ -1238,7 +1251,7 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
         mlen = len(self.ml)
         nlen = len(self.nl)
         # get matrix form
-        matrix, bvector = self._get_matrix_select(self.ml, self.nl, mlen, nlen)
+        matrix, bvector = self._get_matrix_select()
 
         # Solve for the coefficients
         result = np.linalg.lstsq(matrix, bvector)[0]
@@ -1301,7 +1314,7 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
         self.update_approximant()
 
 
-    def _get_matrix_select(self, ml, nl, mlen, nlen, eps=None):
+    def _get_matrix_select(self, eps=None):
         r"""Construct the matrix for some of the series components.
 
         We use a linear solver giving a matrix A which rows are:
@@ -1315,10 +1328,6 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
 
         Parameters
         ----------
-        ml :  list of int
-            The powers to include in the numerator series
-        nl : list of int
-            Powers to include in the denominator series
         eps : array like
             Precision of the reference points
 
@@ -1329,6 +1338,10 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
         b : np.ndarray(npoints)
             b vector for the linear equations
         """
+        ml = self.ml
+        nl = self.nl
+        mlen = len(self.ml)
+        nlen = len(self.nl)
         # Fill out the matrix for the function values
         lenpars = mlen +  nlen
         npoints = self._xlen
@@ -1351,13 +1364,356 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
                     ctmp[-1] = self._m
                     tmp = np.polynomial.chebyshev.chebval(point/self._xmax, ctmp)
                     tmp += np.polynomial.chebyshev.chebval(point/self._xmax, cs)
-                    matrix[i, j] = - (1./eps[i]) * tmp
+                    matrix[i, j] = - self.factor*(1./eps[i]) * tmp
                 else:
                     matrix[i, j] = - (1./eps[i])*np.polynomial.chebyshev.chebval(point/self._xmax, cs)
             # Set values related with the denominator Q_n(x)
             # NOTE: b_0 = 1, so we only have n terms
             prefac = self._y[i]
             for j, npower in enumerate(nl):
+                # start with an array of 2 elements, so it starts at T1
+                cs = np.zeros(npower+1)
+                cs[-1] = 1.0
+                matrix[i, mlen+j] = (1./eps[i])*prefac*np.polynomial.chebyshev.chebval(point/self._xmax, cs)
+                if npower == self._n:
+                    matrix[i, mlen+j] *= self.factor
+            b[i] = - (1./eps[i])*self._y[i]
+        return matrix, b
+
+    def _sort_coeffs_selective(self, coeffs, mlen):
+        """Sort the coefficients of the Pade Approximant.
+
+        Arguments
+        ---------
+        coeffs : np.ndarray(self._xlen)
+            Results from the linear solver.
+
+        Returns
+        -------
+        ps : np.ndarray(m)
+            Coefficients for the numerator of the approximant.
+        qs : np.ndarray(n)
+            Coefficients for the denominator of the approximant.
+
+        """
+        ps = coeffs[:mlen]
+        qs = coeffs[mlen:]
+        return ps, qs
+
+    def residuals(self, pars, lnum=None, nonzeros_num=None, nonzeros_den=None, eps=None):
+        """Compute the residuals of the model.
+
+        Used for the optimization of parameters with LASSO or LSQS.
+
+        Parameters
+        ----------
+        pars : array, float
+            The current parameters, at each iteration of the optimization.
+        """
+        if lnum is None:
+            lnum = len(self.ml)
+        if nonzeros_num is None:
+            raise ValueError("nonzeros_num has to be provided.")
+        if nonzeros_den is None:
+            raise ValueError("nonzeros_den has to be provided.")
+        if eps is None:
+            raise ValueError("eps has to be provided.")
+        self.ml = list(nonzeros_num)
+        self.nl = list(nonzeros_den)
+        # Instead of using polynomials we save the coefficients
+        ps = np.zeros(self._m+1)
+        qs = np.zeros(self._n+1)
+        # Optimize the coefficients using the least-squares non-linear solver
+        ps[nonzeros_num] = pars[:lnum]
+        qs[nonzeros_den] = pars[lnum:]
+        self._ps = ps
+        self._qs = qs
+        self.update_approximant()
+        vmodel = self._evaluate(self._x)
+        return (self._y - vmodel)/eps
+
+    def erms_monotonic(self, pars, lnum=None, nonzeros_num=None, nonzeros_den=None, eps=None, extrapoints=None, delta=5e-2):
+        """Compute the residuals of the model.
+
+        Used for the optimization of parameters with LASSO or LSQS.
+
+        Parameters
+        ----------
+        pars : array, float
+            The current parameters, at each iteration of the optimization.
+        """
+        if lnum is None:
+            lnum = len(self.ml)
+        if nonzeros_num is None:
+            raise ValueError("nonzeros_num has to be provided.")
+        if nonzeros_den is None:
+            raise ValueError("nonzeros_den has to be provided.")
+        if eps is None:
+            raise ValueError("eps has to be provided.")
+        if extrapoints is None:
+            raise ValueError("extrapoints has to be provided.")
+        ## Print all parameters
+        self.ml = list(nonzeros_num)
+        self.nl = list(nonzeros_den)
+        # Instead of using polynomials we save the coefficients
+        ps = np.zeros(self._m+1)
+        qs = np.zeros(self._n+1)
+        # Optimize the coefficients using the least-squares non-linear solver
+        ps[nonzeros_num] = pars[:lnum]
+        qs[nonzeros_den] = pars[lnum:]
+        self._ps = ps
+        self._qs = qs
+        self.update_approximant()
+        vmodel = self._evaluate(self._x)
+        erms = 0.0
+        for i in range(self._xlen):
+            erms += ((vmodel[i] - self._y[i])/eps[i])**2
+        print "erms alone (no sqrt)", erms
+        # Add penalty to the positive values of the model at extrapoints
+        # Evaluate the model at extrapoints
+        outmodel = self._evaluate(extrapoints)
+        # Evaluate the model at x = 0
+        zero = self._evaluate([0.])[0]
+        # Add penalty for positive derivatives at extrapoints
+        # Evaluate the derivatives using finite differences
+        outplusdelta = self._evaluate(extrapoints + delta)
+        penalty = 0.
+        nextra = len(extrapoints)
+        for j in range(nextra):
+            tmpdiff = outmodel[j] - zero
+            if tmpdiff > 0:
+                print "Positive value! - Adding penalty", tmpdiff
+                penalty += tmpdiff
+            tmpder = (outplusdelta[j]- outmodel[j])/delta
+            if tmpder > 0:
+                print "Possitive derivative! - Adding penalty"
+                if extrapoints[j] < 10:
+                    penalty += (100*tmpder)**2.0
+                    print (100*tmpder)**2.0
+                else:
+                    penalty += tmpder**2
+        print "penalty: ", penalty
+        erms += penalty
+        print "whole error", erms
+        return erms
+
+
+class ChebyshevPadeApproximant(ChebyshevApproximant):
+    """Class for scaled Chebyshev approximants generated without Taylor Series coefficients.
+    Using all coefficients.
+
+    Attributes
+    ----------
+    _m, _n : int
+        Highest order of numerator and denominator series
+        of the Pade approximant.
+    _xlen : int
+        Length of the array with points.
+    _der : int or list(int)
+        If derivatives are provided,`_der` stores the values in a different
+        array.
+
+    Methods
+    -------
+    __call__
+    _get_matrix_select
+    _sort_coeffs
+    _evaluate
+    _derivate
+
+    Example
+    -------
+    >>> x = [0., 1.5, 3.4]
+    >>> y = [-0.47, -0.48, -0.498]
+    >>> m = [0, 4]
+    >>> n = [1, 2, 3, 4]
+    >>> padegen = ChebyshevPadeApproximant(x, y, m, n)
+
+    Then we evaluate the function and its first derivative on a new set
+    of points xnew
+
+    >>> xnew = [2.0, 5.0]
+    >>> newdata = padegen(xnew)
+    """
+
+    def __init__(self, x, y, ml, nl, factor=1.0):
+        """Initialize Class for scaled Chebyshev Pade Approximants.
+
+        With general, we mean that we don't have a Taylor series, nor the derivatives
+        and the approximant is generated just from the given points and the
+        function evaluated at those points.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Points where the function was evaluated.
+        y : np.ndarray
+            Values of the function, and/or function
+            derivatives evaluated at `x`.
+        m, n : int
+            Maximum orders of numerator and denominator series
+            of the polynomials.
+
+        """
+        # Check parameters
+        if not isinstance(ml, (list, int)):
+            raise TypeError('ml should be given as list of integers')
+        if not isinstance(nl, (list, int)):
+            raise TypeError('nl should be given as list of integers')
+        mlen = len(ml)
+        # Because the default already contains the order zero for the denominator
+        # if zero is in the list, take it off
+        if 0 in nl:
+            nl.remove(0)
+        nlen = len(nl)
+        # Initialize base class
+        ChebyshevApproximant.__init__(self, x, y, max(ml), max(nl))
+        # Check number of points provided
+        if mlen + nlen > self._xlen:
+            raise ValueError("To construct a [%d/%d] approximant at least\
+                    %d points are needed" % (mlen, nlen, mlen+nlen))
+        # Save the lists
+        self.ml = ml
+        self.nl = nl
+        self.factor = factor
+
+        # Create model
+        self.update_approximant()
+
+    def _evaluate(self, x):
+        """
+        Evaluate the Pade Approximant at the set of points `x`.
+
+        Parameters
+        ----------
+        x : array-like
+            Points where the approximant will be evaluated.
+
+        Returns
+        -------
+        Array with values of the approximant evaluated at x.
+
+        """
+        # p_n T_n
+        nresult = np.polynomial.chebyshev.chebval(x/self._xmax, self._ps)
+        # 1 + q_n T_n
+        dresult = self.factor*np.polynomial.chebyshev.chebval(x/self._xmax, self._qs)
+        return nresult/dresult
+
+    def complete_coefficients(self, nums, denoms):
+        """Complete the list of coefficients to evaluate the model."""
+        # Add zeros por the powers not included in ml and nl
+        ps = np.zeros(self._m+1)
+        ps[self.ml] = nums
+        qs = np.zeros(self._n+1)
+        for i, n in enumerate(self.nl):
+            qs[n] = denoms[i]
+        qs[0] = 1
+        return ps, qs
+
+    def update_approximant(self):
+        """From the current information update the approximant coefficients.
+        """
+        # get matrix form
+        matrix, bvector = self._get_matrix_select()
+
+        # Solve for the coefficients
+        result = np.linalg.lstsq(matrix, bvector)[0]
+        # Split the results for Pm and Qn, also reverse order
+        # because the poly1d polynomials are order from high order
+        # to low order (opposite as the Pade series)
+        mlen = len(self.ml)
+        nums, denoms = self._sort_coeffs_selective(result, mlen)
+        ps, qs = self.complete_coefficients(nums, denoms)
+        # Instead of using polynomials we save the coefficients
+        self._ps = ps
+        self._qs = qs
+
+    def add_point(self, xnew, ynew):
+        """Add new point to the fit and update the model.
+
+        Parameters
+        ----------
+        xnew : float
+            Point to be added.
+        ynew : float
+            The value of the function at the new x.
+
+        """
+        self._x = np.append(self._x, xnew)
+        self._y = np.append(self._y, ynew)
+        self._xlen = len(self._x)
+        self.update_approximant()
+
+    def add_order(self, increment, option):
+        """Add an order to the numerator series.
+
+        Parameters
+        ----------
+        neworder :  int
+            The new order of Chebyshev polynomial to be added.
+        option : str
+            Where is the order added, 'numerator' or 'denominator'
+
+        """
+        if option == 'numerator':
+            self._m += increment
+        elif option == 'denominator':
+            self._n += increment
+        else:
+            raise ValueError("option valid values are:'numerator' or 'denominator'")
+        self.update_approximant()
+
+
+    def _get_matrix_select(self, eps=None):
+        r"""Construct the matrix for some of the series components.
+
+        We use a linear solver giving a matrix A which rows are:
+        :math:`{1, F(x_k)x_k, -x_k, F(x_k)x_k^2, -x_k^2, ..., F(x_k)x_k^n, -x_k^m}`
+        and solve: A x = b,
+        A includes the derivatives in the approximation:
+        :math:`F(x + \epsilon)Q(x + \epsilon) \approx P(x + \epsilon)`
+        where
+        :math:`F(x + \epsilon) \approx F(x) \pm \frac{1}{2}\epsilon F'(x) + ...`
+        and b = - F(x)
+
+        Parameters
+        ----------
+        eps : array like
+            Precision of the reference points
+
+        Returns
+        -------
+        matrix : np.ndarray((npoints, lenpars))
+            Matrix to use for solving the linear equations
+        b : np.ndarray(npoints)
+            b vector for the linear equations
+        """
+        mlen = len(self.ml)
+        nlen = len(self.nl)
+        # Fill out the matrix for the function values
+        lenpars = mlen +  nlen
+        npoints = self._xlen
+        #if lenpars-1 > npoints:
+        #    raise ValueError("The number of points should be the same of greater than the number of parameters.")
+        if eps is not None:
+            if len(eps) != npoints:
+                raise ValueError("eps length should be the same as points used in the fit")
+        else:
+            eps = np.ones(npoints)
+        matrix = np.zeros((npoints, lenpars))
+        b = np.zeros(npoints)
+        for i, point in enumerate(self._x):
+            # Set values related with the numerator P_m(x)
+            # NOTE: As Pm series has a_0, we have m+1 terms
+            for j, mpower in enumerate(self.ml):
+                cs = np.zeros(mpower+1)
+                cs[-1] = 1.0
+                matrix[i, j] = - (1./eps[i])*np.polynomial.chebyshev.chebval(point/self._xmax, cs)
+            # Set values related with the denominator Q_n(x)
+            # NOTE: b_0 = 1, so we only have n terms
+            prefac = self._y[i]
+            for j, npower in enumerate(self.nl):
                 # start with an array of 2 elements, so it starts at T1
                 cs = np.zeros(npower+1)
                 cs[-1] = 1.0
@@ -1384,3 +1740,101 @@ class ChebyshevSelPadeApproximant(ChebyshevApproximant):
         ps = coeffs[:mlen]
         qs = coeffs[mlen:]
         return ps, qs
+
+    def residuals(self, pars, lnum=None, nonzeros_num=None, nonzeros_den=None, eps=None):
+        """Compute the residuals of the model.
+
+        Used for the optimization of parameters with LASSO or LSQS.
+
+        Parameters
+        ----------
+        pars : array, float
+            The current parameters, at each iteration of the optimization.
+        """
+        if lnum is None:
+            lnum = len(self.ml)
+        if nonzeros_num is None:
+            raise ValueError("nonzeros_num has to be provided.")
+        if nonzeros_den is None:
+            raise ValueError("nonzeros_den has to be provided.")
+        if eps is None:
+            raise ValueError("eps has to be provided.")
+        self.ml = list(nonzeros_num)
+        self.nl = list(nonzeros_den)
+        # Instead of using polynomials we save the coefficients
+        ps = np.zeros(self._m+1)
+        qs = np.zeros(self._n+1)
+        # Optimize the coefficients using the least-squares non-linear solver
+        ps[nonzeros_num] = pars[:lnum]
+        qs[nonzeros_den] = pars[lnum:]
+        self._ps = ps
+        self._qs = qs
+        self.update_approximant()
+        vmodel = self._evaluate(self._x)
+        return (self._y - vmodel)/eps
+
+    def erms_monotonic(self, pars, lnum=None, nonzeros_num=None, nonzeros_den=None, eps=None, extrapoints=None, delta=5e-2):
+        """Compute the residuals of the model.
+
+        Used for the optimization of parameters with LASSO or LSQS.
+
+        Parameters
+        ----------
+        pars : array, float
+            The current parameters, at each iteration of the optimization.
+        """
+        if lnum is None:
+            lnum = len(self.ml)
+        if nonzeros_num is None:
+            raise ValueError("nonzeros_num has to be provided.")
+        if nonzeros_den is None:
+            raise ValueError("nonzeros_den has to be provided.")
+        if eps is None:
+            raise ValueError("eps has to be provided.")
+        if extrapoints is None:
+            raise ValueError("extrapoints has to be provided.")
+        ## Print all parameters
+        self.ml = list(nonzeros_num)
+        self.nl = list(nonzeros_den)
+        # Instead of using polynomials we save the coefficients
+        ps = np.zeros(self._m+1)
+        qs = np.zeros(self._n+1)
+        # Optimize the coefficients using the least-squares non-linear solver
+        ps[nonzeros_num] = pars[:lnum]
+        qs[nonzeros_den] = pars[lnum:]
+        self._ps = ps
+        self._qs = qs
+        self.update_approximant()
+        vmodel = self._evaluate(self._x)
+        erms = 0.0
+        for i in range(self._xlen):
+            erms += ((vmodel[i] - self._y[i])/eps[i])**2
+        print "erms alone (no sqrt)", erms
+        # Add penalty to the positive values of the model at extrapoints
+        # Evaluate the model at extrapoints
+        outmodel = self._evaluate(extrapoints)
+        # Evaluate the model at x = 0
+        zero = self._evaluate([0.])[0]
+        # Add penalty for positive derivatives at extrapoints
+        # Evaluate the derivatives using finite differences
+        outplusdelta = self._evaluate(extrapoints + delta)
+        penalty = 0.
+        nextra = len(extrapoints)
+        for j in range(nextra):
+            tmpdiff = outmodel[j] - zero
+            if tmpdiff > 0:
+                #print "Positive value! - Adding penalty", tmpdiff
+                penalty += tmpdiff
+            tmpder = (outplusdelta[j]- outmodel[j])/delta
+            if tmpder > 0:
+                #print "Possitive derivative! - Adding penalty"
+                if extrapoints[j] < 10:
+                    penalty += (100*tmpder)**2.0
+                    #print (100*tmpder)**2.0
+                else:
+                    penalty += tmpder**2
+        print "penalty: ", penalty
+        erms += penalty
+        print "whole error", erms
+        return erms
+
